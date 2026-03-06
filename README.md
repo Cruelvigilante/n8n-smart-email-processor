@@ -15,7 +15,7 @@ This workflow turns your inbox into an intelligent system that can:
 
 # Features
 
-# Email Classification
+### Email Classification
 Incoming emails are automatically categorized into:
 - Promotions
 - Social
@@ -27,12 +27,12 @@ Incoming emails are automatically categorized into:
 
 ---
 
-# Automatic Email Drafting
+### Automatic Email Drafting
 Personal emails can automatically generate reply drafts using gemini-Flash-2.5.
 
 ---
 
-# Receipt Extraction
+### Receipt Extraction
 Receipts are parsed and logged to Google Sheets with:
 - The Purchase Date
 - The Company / Merchant
@@ -40,7 +40,7 @@ Receipts are parsed and logged to Google Sheets with:
 
 ---
 
-# Security Monitoring
+### Security Monitoring
 Security related emails are analyzed and classified into:
 - Security Alerts
 - OTP (One Time Passwords)
@@ -50,12 +50,12 @@ Important events trigger a Pushover notification to my phone.
 
 ---
 
-# Job Alerts
+### Job Alerts
 Job listing emails trigger instant push notifications so that I know to apply to them when i get a second.
 
 ---
 
-# Email Analytics
+### Email Analytics
 Social or misc emails can be summarized and stored in Google Sheets for tracking.
 
 ---
@@ -77,7 +77,7 @@ Gmail Trigger --> Email Parsing + Cleaning --> AI Text Classifier (Gemini) --> R
 
 # Setup
 
-# 1. Requirements
+## 1. Requirements
 
 You will need:
 - n8n instance
@@ -88,7 +88,7 @@ You will need:
 
 ---
 
-# 2. Import the Workflow
+## 2. Import the Workflow
 
 1. Open **n8n**
 2. Import the workflow JSON
@@ -100,7 +100,7 @@ You will need:
 
 ---
 
-# 3. Configure Gmail Trigger
+## 3. Configure Gmail Trigger
 
 Recommended filter:
 is:unread -label:processed-ai
@@ -110,7 +110,7 @@ This prevents the workflow from processing the same email multiple times.
 
 ---
 
-# 4. Activate Workflow
+## 4. Activate Workflow
 
 Once configured, activate the workflow in n8n.
 The system will now automatically process incoming emails every minute.
