@@ -62,6 +62,7 @@ Social or misc emails can be summarized and stored in Google Sheets for tracking
 
 # Workflow Architecture
 Gmail Trigger --> Email Parsing + Cleaning --> AI Text Classifier (Gemini) --> Routing by category --> Category-specific processing --> Merge → Processed-AI label
+<img width="2287" height="1042" alt="image" src="https://github.com/user-attachments/assets/577d9dd2-bd80-4cda-a4c9-e03c9e033548" />
 
 ---
 
