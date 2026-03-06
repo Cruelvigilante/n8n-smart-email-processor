@@ -1,5 +1,5 @@
 {
-  "name": "My workflow",
+  "name": "Gmail Processor",
   "nodes": [
     {
       "parameters": {
@@ -15,7 +15,7 @@
       "type": "n8n-nodes-base.gmailTrigger",
       "typeVersion": 1.3,
       "position": [
-        0,
+        -416,
         0
       ],
       "id": "f1210548-84e0-4abe-bcd8-e9254deaeb13",
@@ -26,15 +26,187 @@
           "name": "Gmail account"
         }
       }
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "messageId": "={{ $json.id }}",
+        "simple": false,
+        "options": {
+          "downloadAttachments": true
+        }
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        -272,
+        0
+      ],
+      "id": "4ab108f6-f574-4ce8-8e74-53c810ab4335",
+      "name": "Get a message",
+      "webhookId": "a02f6a94-015f-4280-b00a-b43feebea18e",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "92O4cpN50cXJmJxN",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first().json;\n\nfunction decodeMimeWord(str) {\n  if (!str || typeof str !== \"string\") return \"\";\n\n  return str.replace(/=\\?([^?]+)\\?([BQbq])\\?([^?]+)\\?=/g, (_, charset, encoding, text) => {\n    try {\n      if (encoding.toUpperCase() === \"B\") {\n        return Buffer.from(text, \"base64\").toString(\"utf8\");\n      }\n\n      // Q-encoding\n      const qp = text\n        .replace(/_/g, \" \")\n        .replace(/=([A-Fa-f0-9]{2})/g, (_, hex) =>\n          String.fromCharCode(parseInt(hex, 16))\n        );\n\n      return Buffer.from(qp, \"binary\").toString(\"utf8\");\n    } catch {\n      return text;\n    }\n  });\n}\n\nfunction cleanHeader(value) {\n  if (value === null || value === undefined) return \"\";\n\n  if (Array.isArray(value)) {\n    value = value.join(\" \");\n  }\n\n  if (typeof value !== \"string\") {\n    value = String(value);\n  }\n\n  return decodeMimeWord(value).replace(/^[A-Za-z-]+:\\s*/, \"\").trim();\n}\n\nfunction parseAddressField(value) {\n  if (!value) {\n    return {\n      text: \"\",\n      name: \"\",\n      email: \"\",\n    };\n  }\n\n  // Already plain string\n  if (typeof value === \"string\") {\n    const cleaned = cleanHeader(value);\n    const match = cleaned.match(/^(.*?)(?:\\s*<([^>]+)>)?$/);\n\n    return {\n      text: cleaned,\n      name: match?.[1]?.trim().replace(/^\"|\"$/g, \"\") || \"\",\n      email: match?.[2]?.trim() || \"\",\n    };\n  }\n\n  // Common object format from n8n/mailparser-style fields\n  if (typeof value === \"object\") {\n    if (value.text) {\n      const cleaned = cleanHeader(value.text);\n      const first = value.value?.[0];\n\n      return {\n        text: cleaned,\n        name: first?.name ? decodeMimeWord(first.name).trim() : \"\",\n        email: first?.address || \"\",\n      };\n    }\n\n    // Sometimes just { address, name }\n    if (value.address || value.name) {\n      const name = value.name ? decodeMimeWord(String(value.name)).trim() : \"\";\n      const email = value.address ? String(value.address).trim() : \"\";\n      return {\n        text: name && email ? `${name} <${email}>` : name || email,\n        name,\n        email,\n      };\n    }\n\n    // Sometimes array-like inside object\n    if (Array.isArray(value.value) && value.value.length > 0) {\n      const first = value.value[0];\n      const name = first?.name ? decodeMimeWord(String(first.name)).trim() : \"\";\n      const email = first?.address ? String(first.address).trim() : \"\";\n      return {\n        text: name && email ? `${name} <${email}>` : name || email,\n        name,\n        email,\n      };\n    }\n  }\n\n  return {\n    text: cleanHeader(value),\n    name: \"\",\n    email: \"\",\n  };\n}\n\nfunction cleanBody(text) {\n  if (!text) return \"\";\n\n  return String(text)\n    .replace(/\\r\\n/g, \"\\n\")\n    .replace(/\\r/g, \"\\n\")\n    .replace(/\\\\n/g, \"\\n\")\n    .replace(/\\n{3,}/g, \"\\n\\n\")\n    .replace(/[ \\t]{2,}/g, \" \")\n    .trim();\n}\n\nconst fromParsed = parseAddressField(item.from);\nconst toParsed = parseAddressField(item.to);\n\nreturn [\n  {\n    json: {\n      id: item.id ?? \"\",\n      threadId: item.threadId ?? \"\",\n\n      subject: cleanHeader(item.subject),\n      date: cleanHeader(item.date),\n\n      from: fromParsed.text,\n      fromName: fromParsed.name,\n      fromEmail: fromParsed.email,\n\n      to: toParsed.text,\n      toName: toParsed.name,\n      toEmail: toParsed.email,\n\n      body: cleanBody(item.text || item.html || \"\"),\n      html: item.html || \"\",\n    },\n  },\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -128,
+        0
+      ],
+      "id": "e9037bae-22c4-4403-b18f-59eb5bef7a28",
+      "name": "Gmail Parser"
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first().json;\n\nlet body = item.body || \"\";\n\n// convert ANY escaped newline into real newline\nbody = body.replace(/\\s*\\\\n\\s*/g, \"\\n\");\nbody = body.replace(/\\s*\\\\r\\s*/g, \"\\n\");\nbody = body.replace(/\\s*\\\\r\\\\n\\s*/g, \"\\n\");\n\n// remove URLs\nbody = body.replace(/https?:\\/\\/[^\\s]+/g, \"\");\n\n// remove tracking params\nbody = body.replace(/trackingId=[^\\s]+/gi, \"\");\n\n// remove long junk tokens\nbody = body.replace(/[A-Za-z0-9_-]{30,}/g, \"\");\n\n// remove LinkedIn footer\nbody = body.replace(/Manage your job alerts[\\s\\S]*/i, \"\");\n\n// normalize whitespace\nbody = body.replace(/[ \\t]+/g, \" \");\nbody = body.replace(/\\n{3,}/g, \"\\n\\n\");\n\nbody = body\n  .split(\"\\n\")\n  .map(line => line.trim())\n  .filter(line => line.length > 2)\n  .join(\"\\n\")\n  .trim();\n\nreturn [\n  {\n    json: {\n      ...item,\n      cleanBody: body,\n    },\n  },\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        32,
+        0
+      ],
+      "id": "41f8adca-b5d1-4676-8567-e776c46b6c93",
+      "name": "Gmail Body Cleaner"
+    },
+    {
+      "parameters": {
+        "inputText": "=Subject: {{$json.subject}}\n\nFrom: {{$json.fromName}}\n\nBody:\n{{$json.cleanBody}}",
+        "categories": {
+          "categories": [
+            {
+              "category": "Promotions",
+              "description": "marketing emails, discounts, newsletters, event promotions, product promotions"
+            },
+            {
+              "category": "Social",
+              "description": "social network notifications, community updates, network activity alerts"
+            },
+            {
+              "category": "Personal",
+              "description": "direct person-to-person communication that does not fit another category"
+            },
+            {
+              "category": "Job Listings",
+              "description": "job alerts, hiring messages, recruiting emails, application-related job opportunities"
+            },
+            {
+              "category": "Passwords & Requests",
+              "description": "password resets, login codes, account security alerts, urgent account action requests"
+            },
+            {
+              "category": "Receipts",
+              "description": "receipts, invoices, payment confirmations, billing notices, order confirmations"
+            },
+            {
+              "category": "Misc",
+              "description": "anything unclear or not fitting the above"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.textClassifier",
+      "typeVersion": 1.1,
+      "position": [
+        176,
+        -80
+      ],
+      "id": "5e9e6884-5e3d-4eba-9a65-b6fb89df5850",
+      "name": "Text Classifier"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        176,
+        224
+      ],
+      "id": "b7797d52-4428-455b-9c56-ac4f93a6371f",
+      "name": "Google Gemini Chat Model",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "SxVLYHLogdq2vGFz",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
     }
   ],
   "pinData": {},
-  "connections": {},
+  "connections": {
+    "Gmail Trigger": {
+      "main": [
+        [
+          {
+            "node": "Get a message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get a message": {
+      "main": [
+        [
+          {
+            "node": "Gmail Parser",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail Parser": {
+      "main": [
+        [
+          {
+            "node": "Gmail Body Cleaner",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail Body Cleaner": {
+      "main": [
+        [
+          {
+            "node": "Text Classifier",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Gemini Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Text Classifier",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
   "active": false,
   "settings": {
     "executionOrder": "v1"
   },
-  "versionId": "f52687be-ac84-4b4f-92d7-fd9c314419cd",
+  "versionId": "6f6dee26-5c4d-41fb-a310-e030ec55e5c2",
   "meta": {
     "templateCredsSetupCompleted": true,
     "instanceId": "ef94184010d29bc9ee3765066e0f5687aac4094436c50fb427f99c482dafcdea"
