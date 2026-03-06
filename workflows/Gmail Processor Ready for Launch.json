@@ -1,0 +1,1341 @@
+{
+  "name": "Gmail Processor",
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "filters": {
+          "q": "is:unread -label:Processed-AI"
+        }
+      },
+      "type": "n8n-nodes-base.gmailTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        -416,
+        0
+      ],
+      "id": "f1210548-84e0-4abe-bcd8-e9254deaeb13",
+      "name": "Gmail Trigger",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "92O4cpN50cXJmJxN",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "messageId": "={{ $json.id }}",
+        "simple": false,
+        "options": {
+          "downloadAttachments": true
+        }
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        -272,
+        0
+      ],
+      "id": "4ab108f6-f574-4ce8-8e74-53c810ab4335",
+      "name": "Get a message",
+      "webhookId": "a02f6a94-015f-4280-b00a-b43feebea18e",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "92O4cpN50cXJmJxN",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first().json;\n\nfunction decodeMimeWord(str) {\n  if (!str || typeof str !== \"string\") return \"\";\n\n  return str.replace(/=\\?([^?]+)\\?([BQbq])\\?([^?]+)\\?=/g, (_, charset, encoding, text) => {\n    try {\n      if (encoding.toUpperCase() === \"B\") {\n        return Buffer.from(text, \"base64\").toString(\"utf8\");\n      }\n\n      // Q-encoding\n      const qp = text\n        .replace(/_/g, \" \")\n        .replace(/=([A-Fa-f0-9]{2})/g, (_, hex) =>\n          String.fromCharCode(parseInt(hex, 16))\n        );\n\n      return Buffer.from(qp, \"binary\").toString(\"utf8\");\n    } catch {\n      return text;\n    }\n  });\n}\n\nfunction cleanHeader(value) {\n  if (value === null || value === undefined) return \"\";\n\n  if (Array.isArray(value)) {\n    value = value.join(\" \");\n  }\n\n  if (typeof value !== \"string\") {\n    value = String(value);\n  }\n\n  return decodeMimeWord(value).replace(/^[A-Za-z-]+:\\s*/, \"\").trim();\n}\n\nfunction parseAddressField(value) {\n  if (!value) {\n    return {\n      text: \"\",\n      name: \"\",\n      email: \"\",\n    };\n  }\n\n  // Already plain string\n  if (typeof value === \"string\") {\n    const cleaned = cleanHeader(value);\n    const match = cleaned.match(/^(.*?)(?:\\s*<([^>]+)>)?$/);\n\n    return {\n      text: cleaned,\n      name: match?.[1]?.trim().replace(/^\"|\"$/g, \"\") || \"\",\n      email: match?.[2]?.trim() || \"\",\n    };\n  }\n\n  // Common object format from n8n/mailparser-style fields\n  if (typeof value === \"object\") {\n    if (value.text) {\n      const cleaned = cleanHeader(value.text);\n      const first = value.value?.[0];\n\n      return {\n        text: cleaned,\n        name: first?.name ? decodeMimeWord(first.name).trim() : \"\",\n        email: first?.address || \"\",\n      };\n    }\n\n    // Sometimes just { address, name }\n    if (value.address || value.name) {\n      const name = value.name ? decodeMimeWord(String(value.name)).trim() : \"\";\n      const email = value.address ? String(value.address).trim() : \"\";\n      return {\n        text: name && email ? `${name} <${email}>` : name || email,\n        name,\n        email,\n      };\n    }\n\n    // Sometimes array-like inside object\n    if (Array.isArray(value.value) && value.value.length > 0) {\n      const first = value.value[0];\n      const name = first?.name ? decodeMimeWord(String(first.name)).trim() : \"\";\n      const email = first?.address ? String(first.address).trim() : \"\";\n      return {\n        text: name && email ? `${name} <${email}>` : name || email,\n        name,\n        email,\n      };\n    }\n  }\n\n  return {\n    text: cleanHeader(value),\n    name: \"\",\n    email: \"\",\n  };\n}\n\nfunction cleanBody(text) {\n  if (!text) return \"\";\n\n  return String(text)\n    .replace(/\\r\\n/g, \"\\n\")\n    .replace(/\\r/g, \"\\n\")\n    .replace(/\\\\n/g, \"\\n\")\n    .replace(/\\n{3,}/g, \"\\n\\n\")\n    .replace(/[ \\t]{2,}/g, \" \")\n    .trim();\n}\n\nconst fromParsed = parseAddressField(item.from);\nconst toParsed = parseAddressField(item.to);\n\nreturn [\n  {\n    json: {\n      id: item.id ?? \"\",\n      threadId: item.threadId ?? \"\",\n\n      subject: cleanHeader(item.subject),\n      date: cleanHeader(item.date),\n\n      from: fromParsed.text,\n      fromName: fromParsed.name,\n      fromEmail: fromParsed.email,\n\n      to: toParsed.text,\n      toName: toParsed.name,\n      toEmail: toParsed.email,\n\n      body: cleanBody(item.text || item.html || \"\"),\n      html: item.html || \"\",\n    },\n  },\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -128,
+        0
+      ],
+      "id": "e9037bae-22c4-4403-b18f-59eb5bef7a28",
+      "name": "Gmail Parser"
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first().json;\n\nlet body = item.body || \"\";\n\n// convert ANY escaped newline into real newline\nbody = body.replace(/\\s*\\\\n\\s*/g, \"\\n\");\nbody = body.replace(/\\s*\\\\r\\s*/g, \"\\n\");\nbody = body.replace(/\\s*\\\\r\\\\n\\s*/g, \"\\n\");\n\n// remove URLs\nbody = body.replace(/https?:\\/\\/[^\\s]+/g, \"\");\n\n// remove tracking params\nbody = body.replace(/trackingId=[^\\s]+/gi, \"\");\n\n// remove long junk tokens\nbody = body.replace(/[A-Za-z0-9_-]{30,}/g, \"\");\n\n// remove LinkedIn footer\nbody = body.replace(/Manage your job alerts[\\s\\S]*/i, \"\");\n\n// normalize whitespace\nbody = body.replace(/[ \\t]+/g, \" \");\nbody = body.replace(/\\n{3,}/g, \"\\n\\n\");\n\nbody = body\n  .split(\"\\n\")\n  .map(line => line.trim())\n  .filter(line => line.length > 2)\n  .join(\"\\n\")\n  .trim();\n\nreturn [\n  {\n    json: {\n      ...item,\n      cleanBody: body,\n    },\n  },\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        16,
+        0
+      ],
+      "id": "41f8adca-b5d1-4676-8567-e776c46b6c93",
+      "name": "Gmail Body Cleaner"
+    },
+    {
+      "parameters": {
+        "inputText": "=Subject: {{$json.subject}}\n\nFrom: {{$json.fromName}}\n\nBody:\n{{$json.cleanBody}}",
+        "categories": {
+          "categories": [
+            {
+              "category": "Promotions",
+              "description": "marketing emails, discounts, newsletters, event promotions, product promotions"
+            },
+            {
+              "category": "Social",
+              "description": "social network notifications, community updates, network activity alerts"
+            },
+            {
+              "category": "Personal",
+              "description": "direct person-to-person communication that does not fit another category"
+            },
+            {
+              "category": "Job Listings",
+              "description": "job alerts, hiring messages, recruiting emails, application-related job opportunities"
+            },
+            {
+              "category": "Passwords & Requests",
+              "description": "password resets, login codes, account security alerts, urgent account action requests"
+            },
+            {
+              "category": "Receipts",
+              "description": "receipts, invoices, payment confirmations, billing notices, order confirmations"
+            },
+            {
+              "category": "Misc",
+              "description": "anything unclear or not fitting the above"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.textClassifier",
+      "typeVersion": 1.1,
+      "position": [
+        160,
+        -80
+      ],
+      "id": "5e9e6884-5e3d-4eba-9a65-b6fb89df5850",
+      "name": "Text Classifier"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        160,
+        224
+      ],
+      "id": "b7797d52-4428-455b-9c56-ac4f93a6371f",
+      "name": "Google Gemini Chat Model",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "SxVLYHLogdq2vGFz",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "thread",
+        "operation": "delete",
+        "threadId": "={{ $('Gmail Trigger').item.json.threadId }}"
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        1200,
+        -480
+      ],
+      "id": "a7f57017-9036-41e7-8a18-47b0a871e250",
+      "name": "Delete a thread",
+      "webhookId": "af7a0b49-9973-4ddd-a5f5-91a6ae6b0d76",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "92O4cpN50cXJmJxN",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "numberInputs": 4
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        1792,
+        -48
+      ],
+      "id": "214f075f-07b7-471e-a630-8fe75d5db10f",
+      "name": "Full Merge"
+    },
+    {
+      "parameters": {
+        "resource": "thread",
+        "operation": "addLabels",
+        "threadId": "={{ $('Gmail Body Cleaner').item.json.threadId }}",
+        "labelIds": [
+          "Label_6006438400318700777"
+        ]
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        1952,
+        -16
+      ],
+      "id": "6e565f68-0744-420c-9dba-6d74d9887c72",
+      "name": "Add Processed-AI Label",
+      "webhookId": "61529e8f-2e13-47eb-b0cd-e2656279de72",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "92O4cpN50cXJmJxN",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "thread",
+        "operation": "addLabels",
+        "threadId": "={{ $('Gmail Trigger').item.json.threadId }}",
+        "labelIds": [
+          "Label_5534136234046530165"
+        ]
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        608,
+        -160
+      ],
+      "id": "ef331027-2048-41d3-acf0-f5c5ad812c91",
+      "name": "Adds Personal Label",
+      "webhookId": "61529e8f-2e13-47eb-b0cd-e2656279de72",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "92O4cpN50cXJmJxN",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "thread",
+        "operation": "addLabels",
+        "threadId": "={{ $('Gmail Trigger').item.json.threadId }}",
+        "labelIds": [
+          "CATEGORY_SOCIAL"
+        ]
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        608,
+        -320
+      ],
+      "id": "9297e1ba-ef0b-44d7-b3e3-0cf8e1ece520",
+      "name": "Adds Socials Label",
+      "webhookId": "61529e8f-2e13-47eb-b0cd-e2656279de72",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "92O4cpN50cXJmJxN",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "thread",
+        "operation": "addLabels",
+        "threadId": "={{ $('Gmail Trigger').item.json.threadId }}",
+        "labelIds": [
+          "CATEGORY_PROMOTIONS"
+        ]
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        608,
+        -480
+      ],
+      "id": "fbcd8d36-cf3e-470c-a1c7-1bf3b0e28d05",
+      "name": "Adds Promotion Label",
+      "webhookId": "61529e8f-2e13-47eb-b0cd-e2656279de72",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "92O4cpN50cXJmJxN",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "models/gemini-2.5-flash",
+          "mode": "list",
+          "cachedResultName": "models/gemini-2.5-flash"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "=You are an AI assistant that summarizes emails for a spreadsheet log.\n\nReturn ONLY JSON like this:\n\n{\n\"summary\": \"1-2 sentence explanation of the email\",\n\"snippet\": \"5-10 word description\"\n}\n\nEMAIL DATA\n\nSubject:\n{{ $('Gmail Body Cleaner').item.json.subject }}\n\nSender:\n{{ $('Gmail Body Cleaner').item.json.fromName }}\n\nBody:\n{{ $('Gmail Body Cleaner').item.json.cleanBody }}"
+            }
+          ]
+        },
+        "jsonOutput": true,
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.googleGemini",
+      "typeVersion": 1,
+      "position": [
+        752,
+        -320
+      ],
+      "id": "0662b190-d5cc-4cf0-8e92-f889d38e54aa",
+      "name": "Email Summary",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "SxVLYHLogdq2vGFz",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "models/gemini-2.5-flash",
+          "mode": "list",
+          "cachedResultName": "models/gemini-2.5-flash"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "=You are helping draft an email reply.\n\nWrite a polite, natural-sounding response to the email below.\n\nInstructions:\n- Sound human and natural\n- Match the sender's tone\n- Keep it concise unless more detail is needed\n- Do not make up information\n- Do not include a subject line\n- Always end the email with:\nThe closing signature MUST be exactly:\nBest,\nCayden\n\nReturn ONLY valid JSON in this format:\n\n{\n  \"replyDraft\": \"full reply text\"\n}\n\nEmail subject:\n{{ $('Gmail Body Cleaner').item.json.subject }}\n\nFrom:\n{{ $('Gmail Body Cleaner').item.json.fromName }}\n\nEmail body:\n{{ $('Gmail Body Cleaner').item.json.cleanBody }}"
+            }
+          ]
+        },
+        "jsonOutput": true,
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.googleGemini",
+      "typeVersion": 1,
+      "position": [
+        752,
+        -160
+      ],
+      "id": "1fc51c98-d23c-4d9a-bb6a-a6d42b04703d",
+      "name": "Email Draft",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "SxVLYHLogdq2vGFz",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "draft",
+        "subject": "={{ $('Gmail Body Cleaner').item.json.subject }}",
+        "message": "={{ $json.replyDraft }}",
+        "options": {
+          "threadId": "={{ $('Gmail Trigger').item.json.threadId }}",
+          "sendTo": "={{ $('Gmail Body Cleaner').item.json.fromEmail }}"
+        }
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        1200,
+        -160
+      ],
+      "id": "3376515e-0ed4-4a54-b580-245de01f4562",
+      "name": "Create a draft",
+      "webhookId": "350b93cf-2787-4963-9640-6ec041ce916e",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "92O4cpN50cXJmJxN",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "return items.map(item => {\n  const parsed = JSON.parse(item.json.content.parts[0].text);\n\n  return {\n    json: {\n      ...item.json,\n      replyDraft: parsed.replyDraft,\n      subject: $('Gmail Body Cleaner').item.json.subject,\n      fromEmail: $('Gmail Body Cleaner').item.json.fromEmail,\n      threadId: $('Gmail Body Cleaner').item.json.threadId,\n    }\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1024,
+        -160
+      ],
+      "id": "35728ccc-783c-4e1e-84c3-9320e90bc037",
+      "name": "JSON Gmail Formatter"
+    },
+    {
+      "parameters": {
+        "jsCode": "const text = $json.content.parts[0].text;\n\n// remove newlines Gemini adds\nconst cleaned = text.trim();\n\n// parse the JSON string\nconst parsed = JSON.parse(cleaned);\n\nreturn [\n{\n  json: {\n    id: $('Gmail Body Cleaner').item.json.id,\n    date: $('Gmail Body Cleaner').item.json.date,\n    subject: $('Gmail Body Cleaner').item.json.subject,\n    summary: parsed.summary,\n    snippet: parsed.snippet\n  }\n}\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1024,
+        -320
+      ],
+      "id": "e721b512-d98b-41d9-a222-e3ac879925c2",
+      "name": "JSON Sheets Formatter"
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "18gUd4hojIAkbb7wnKob7o6B6JaR9qTKBkO-tb_J-NfY",
+          "mode": "list",
+          "cachedResultName": "Email Summary n8n",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/18gUd4hojIAkbb7wnKob7o6B6JaR9qTKBkO-tb_J-NfY/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Sheet1",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/18gUd4hojIAkbb7wnKob7o6B6JaR9qTKBkO-tb_J-NfY/edit#gid=0"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "ID": "={{ $json.id }}",
+            "Date": "={{ $json.date }}",
+            "Subject Line": "={{ $json.subject }}",
+            "Summary": "={{ $json.summary }}",
+            "Snippet": "={{ $json.snippet }}"
+          },
+          "matchingColumns": [
+            "ID"
+          ],
+          "schema": [
+            {
+              "id": "ID",
+              "displayName": "ID",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Date",
+              "displayName": "Date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Subject Line",
+              "displayName": "Subject Line",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Summary",
+              "displayName": "Summary",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Snippet",
+              "displayName": "Snippet",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1200,
+        -320
+      ],
+      "id": "4cb1b17b-be05-43b6-851d-94747d35b691",
+      "name": "Adds Info to Google Sheets",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "FfiohPXeA6UYDqAB",
+          "name": "Google Sheets account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "thread",
+        "operation": "addLabels",
+        "threadId": "={{ $('Gmail Trigger').item.json.threadId }}",
+        "labelIds": [
+          "Label_5647620310624266769"
+        ]
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        608,
+        0
+      ],
+      "id": "e94ce0ee-7896-4877-892a-760730e8ab02",
+      "name": "Adds Jobs Listing Label",
+      "webhookId": "61529e8f-2e13-47eb-b0cd-e2656279de72",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "92O4cpN50cXJmJxN",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.pushover.net/1/messages.json",
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "token",
+              "value": "a27zeajgqpgg5tewzy6z2d2kiydxn4"
+            },
+            {
+              "name": "user",
+              "value": "u728g6iexpgdm1fvyrnp6rpukjmcow"
+            },
+            {
+              "name": "message",
+              "value": "={{ $('Gmail Body Cleaner').item.json.subject }}"
+            },
+            {
+              "name": "title",
+              "value": "Job Alert!"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        1200,
+        0
+      ],
+      "id": "bd10f6ab-4e02-4866-be4a-7af2193aa054",
+      "name": "HTTP Request"
+    },
+    {
+      "parameters": {
+        "resource": "thread",
+        "operation": "addLabels",
+        "threadId": "={{ $('Gmail Trigger').item.json.threadId }}",
+        "labelIds": [
+          "Label_2074756088130603894"
+        ]
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        608,
+        160
+      ],
+      "id": "fdd1a983-46a0-4986-91aa-e461f88f3192",
+      "name": "Adds Passwords & Requests Label",
+      "webhookId": "61529e8f-2e13-47eb-b0cd-e2656279de72",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "92O4cpN50cXJmJxN",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "models/gemini-2.5-flash",
+          "mode": "list",
+          "cachedResultName": "models/gemini-2.5-flash"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "=You are analyzing an email related to account security.\n\nClassify the email into exactly one of these categories:\n- \"security_alert\" = suspicious login, password reset, fraud warning, unusual activity, verification of a security event\n- \"otp\" = one-time passcode, verification code, login code, two-factor authentication code\n- \"account_update\" = account changes, profile updates, password changed confirmation, email changed confirmation, settings updated\n- \"none\" = none of the above\n\nReturn ONLY valid JSON in this format:\n\n{\n  \"category\": \"security_alert | otp | account_update | none\",\n  \"type\": \"short description\",\n  \"riskLevel\": \"low | medium | high\"\n}\n\nRules:\n- Use \"otp\" only if the email clearly contains a verification code or one-time password\n- Use \"security_alert\" for suspicious activity, fraud, login warnings, or urgent security notices\n- Use \"account_update\" for normal account change confirmations or update notices\n- Use \"none\" if the email is unrelated to security\n\nEmail Subject:\n{{ $('Gmail Body Cleaner').item.json.subject }}\n\nSender:\n{{ $('Gmail Body Cleaner').item.json.fromEmail }}\n\nEmail Body:\n{{ $('Gmail Body Cleaner').item.json.cleanBody }}"
+            }
+          ]
+        },
+        "jsonOutput": true,
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.googleGemini",
+      "typeVersion": 1,
+      "position": [
+        752,
+        160
+      ],
+      "id": "75d23835-79a3-42b5-8201-2ef5a87c2b29",
+      "name": "Security Concern Analyser",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "SxVLYHLogdq2vGFz",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "return items.map(item => {\n  const parsed = JSON.parse(item.json.content.parts[0].text);\n\n  return {\n    json: {\n      ...item.json,\n      category: parsed.category,\n      type: parsed.type,\n      riskLevel: parsed.riskLevel\n    }\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1024,
+        160
+      ],
+      "id": "17b6d820-c347-4dc4-8422-e43724cd013e",
+      "name": "Security JSON Converter"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.category }}",
+                    "rightValue": "security_alert",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "bbb03c47-1fa6-4480-ab19-4c08e43eb303"
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "3f571b83-f98f-4bbe-87a9-32656b05a761",
+                    "leftValue": "={{ $json.category }}",
+                    "rightValue": "otp",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "463a35d0-3827-45b2-852e-3e1af1a767e7",
+                    "leftValue": "={{ $json.category }}",
+                    "rightValue": "account_update",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        1200,
+        144
+      ],
+      "id": "4ef3e13b-9e7c-42c4-a0e6-c6fca07bbd3b",
+      "name": "Switch"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.pushover.net/1/messages.json",
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "token",
+              "value": "a27zeajgqpgg5tewzy6z2d2kiydxn4"
+            },
+            {
+              "name": "user",
+              "value": "u728g6iexpgdm1fvyrnp6rpukjmcow"
+            },
+            {
+              "name": "message",
+              "value": "={{ \"Type: \" + $json.type + \"\\nSubject: \" + $('Gmail Body Cleaner').item.json.subject + \"\\nFrom: \" + $('Gmail Body Cleaner').item.json.fromEmail }}"
+            },
+            {
+              "name": "title",
+              "value": "Security Alert!"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        1376,
+        144
+      ],
+      "id": "a376194a-eae1-46cc-acbc-7574906b4a7b",
+      "name": "HTTP Request1"
+    },
+    {
+      "parameters": {
+        "numberInputs": 4
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        1552,
+        176
+      ],
+      "id": "f449d1e6-af1f-412a-bd15-d6f5ea66e8a7",
+      "name": "Merge"
+    },
+    {
+      "parameters": {
+        "resource": "thread",
+        "operation": "addLabels",
+        "threadId": "={{ $('Gmail Trigger').item.json.threadId }}",
+        "labelIds": [
+          "Label_1189715076837657701"
+        ]
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        608,
+        336
+      ],
+      "id": "a240dd20-2f96-49b3-894c-5df24f06ed63",
+      "name": "Adds Receipts Label",
+      "webhookId": "61529e8f-2e13-47eb-b0cd-e2656279de72",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "92O4cpN50cXJmJxN",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "return items.map(item => {\n  const parsed = JSON.parse(item.json.content.parts[0].text);\n\n  return {\n    json: {\n      ...item.json,\n      id: $('Gmail Body Cleaner').item.json.id,\n      date: parsed.date || $('Gmail Body Cleaner').item.json.date,\n      company: parsed.company,\n      charge: parsed.charge\n    }\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1024,
+        336
+      ],
+      "id": "f7c67a44-3e48-48d5-a705-7c5a938b0e26",
+      "name": "JSON Receipt Converter"
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "models/gemini-2.5-flash",
+          "mode": "list",
+          "cachedResultName": "models/gemini-2.5-flash"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "=You are analyzing an email receipt or purchase confirmation.\n\nExtract the key receipt details from the email.\n\nReturn ONLY valid JSON in this exact format:\n\n{\n  \"date\": \"YYYY-MM-DD\",\n  \"company\": \"merchant or company name\",\n  \"charge\": 0.00\n}\n\nRules:\n- \"date\" should be the purchase date if clearly available; otherwise use the email date\n- \"company\" should be the business, merchant, or vendor name\n- \"charge\" should be the total amount charged as a number only, with no dollar sign\n- If the charge is not clearly stated, return 0\n- Return only valid JSON, no markdown or extra text\n\nEmail Subject:\n{{ $('Gmail Body Cleaner').item.json.subject }}\n\nSender:\n{{ $('Gmail Body Cleaner').item.json.fromName }}\n\nEmail Date:\n{{ $('Gmail Body Cleaner').item.json.date }}\n\nEmail Body:\n{{ $('Gmail Body Cleaner').item.json.cleanBody }}"
+            }
+          ]
+        },
+        "jsonOutput": true,
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.googleGemini",
+      "typeVersion": 1,
+      "position": [
+        752,
+        336
+      ],
+      "id": "bbc7f870-f67a-4f14-bed4-d6b5a21973f0",
+      "name": "Receipt Analyzer",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "SxVLYHLogdq2vGFz",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "16Gax9uxfuiGG5BfWrbxPAsQDWiRYTOrijKzQnMvVwrQ",
+          "mode": "list",
+          "cachedResultName": "n8n Reciepts",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/16Gax9uxfuiGG5BfWrbxPAsQDWiRYTOrijKzQnMvVwrQ/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Sheet1",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/16Gax9uxfuiGG5BfWrbxPAsQDWiRYTOrijKzQnMvVwrQ/edit#gid=0"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "ID ": "={{ $json.id }}",
+            "Company": "={{ $json.company }}",
+            "Date": "={{ $json.date }}",
+            "Charge": "={{ $json.charge }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "ID ",
+              "displayName": "ID ",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Date",
+              "displayName": "Date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Company",
+              "displayName": "Company",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Charge",
+              "displayName": "Charge",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1200,
+        336
+      ],
+      "id": "8d827f45-af96-44e7-98e4-3e2fc601ef37",
+      "name": "Append row in sheet",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "FfiohPXeA6UYDqAB",
+          "name": "Google Sheets account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "thread",
+        "operation": "addLabels",
+        "threadId": "={{ $('Gmail Trigger').item.json.threadId }}",
+        "labelIds": [
+          "Label_3198409137327968065"
+        ]
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        608,
+        496
+      ],
+      "id": "542b9745-ed26-4f2a-a6ed-6cd60b5e8dce",
+      "name": "Adds Misc Label",
+      "webhookId": "61529e8f-2e13-47eb-b0cd-e2656279de72",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "92O4cpN50cXJmJxN",
+          "name": "Gmail account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Gmail Trigger": {
+      "main": [
+        [
+          {
+            "node": "Get a message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get a message": {
+      "main": [
+        [
+          {
+            "node": "Gmail Parser",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail Parser": {
+      "main": [
+        [
+          {
+            "node": "Gmail Body Cleaner",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail Body Cleaner": {
+      "main": [
+        [
+          {
+            "node": "Text Classifier",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Gemini Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Text Classifier",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Text Classifier": {
+      "main": [
+        [
+          {
+            "node": "Adds Promotion Label",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Adds Socials Label",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Adds Personal Label",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Adds Jobs Listing Label",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Adds Passwords & Requests Label",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Adds Receipts Label",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Adds Misc Label",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Delete a thread": {
+      "main": [
+        []
+      ]
+    },
+    "Full Merge": {
+      "main": [
+        [
+          {
+            "node": "Add Processed-AI Label",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Adds Socials Label": {
+      "main": [
+        [
+          {
+            "node": "Email Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Adds Promotion Label": {
+      "main": [
+        [
+          {
+            "node": "Delete a thread",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Adds Personal Label": {
+      "main": [
+        [
+          {
+            "node": "Email Draft",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Email Summary": {
+      "main": [
+        [
+          {
+            "node": "JSON Sheets Formatter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Email Draft": {
+      "main": [
+        [
+          {
+            "node": "JSON Gmail Formatter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "JSON Gmail Formatter": {
+      "main": [
+        [
+          {
+            "node": "Create a draft",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "JSON Sheets Formatter": {
+      "main": [
+        [
+          {
+            "node": "Adds Info to Google Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Adds Info to Google Sheets": {
+      "main": [
+        [
+          {
+            "node": "Full Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create a draft": {
+      "main": [
+        [
+          {
+            "node": "Full Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Adds Jobs Listing Label": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Full Merge",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "Adds Passwords & Requests Label": {
+      "main": [
+        [
+          {
+            "node": "Security Concern Analyser",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Security Concern Analyser": {
+      "main": [
+        [
+          {
+            "node": "Security JSON Converter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Security JSON Converter": {
+      "main": [
+        [
+          {
+            "node": "Switch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "HTTP Request1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "HTTP Request1": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "Full Merge",
+            "type": "main",
+            "index": 3
+          }
+        ]
+      ]
+    },
+    "Adds Receipts Label": {
+      "main": [
+        [
+          {
+            "node": "Receipt Analyzer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Receipt Analyzer": {
+      "main": [
+        [
+          {
+            "node": "JSON Receipt Converter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "JSON Receipt Converter": {
+      "main": [
+        [
+          {
+            "node": "Append row in sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Append row in sheet": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "Adds Misc Label": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 3
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "545ac78c-696d-4fe3-aa46-d2a52523c6b1",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "ef94184010d29bc9ee3765066e0f5687aac4094436c50fb427f99c482dafcdea"
+  },
+  "id": "V3ltZ5qmvaLHVJMk",
+  "tags": []
+}
